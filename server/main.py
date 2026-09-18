@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from agent.config import FRONTEND_URL
 from agent.conversation_memory import build_conversation_memory_store
 from agent.core import build_agent, run_turn
 from agent.supabase_clients import build_auth_client, build_service_client
@@ -45,12 +46,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# The frontend (Phase 7) runs on Vite's dev server, a different origin
-# (localhost:5173) than this API (localhost:8000) — browsers block
-# cross-origin requests by default unless the server explicitly allows it.
+# The frontend runs on a different origin than this API — locally that's
+# Vite's dev server (localhost:5173), and in production it's the deployed
+# Vercel URL (FRONTEND_URL) — browsers block cross-origin requests by
+# default unless the server explicitly allows the calling origin.
+allowed_origins = ["http://localhost:5173"]
+if FRONTEND_URL:
+    allowed_origins.append(FRONTEND_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

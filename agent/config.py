@@ -81,3 +81,10 @@ for _name, _value in [
             f"{_name} is not set. Copy .env.example to .env and fill it in "
             "(create a free project at https://www.supabase.com/)."
         )
+
+# The deployed frontend's URL (Phase 8, Vercel) — CORS needs to explicitly
+# allow it, and it isn't known until after that deploy exists, so it's a
+# plain optional env var rather than something set in code ahead of time.
+# localhost:5173 (Vite's dev server) is always allowed, regardless, for
+# local development.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
