@@ -62,9 +62,15 @@ app.add_middleware(
 # just never through this website itself.
 @app.post("/auth/login")
 async def login(request: LoginRequest):
-    result = app.state.auth_client.auth.sign_in_with_password(
-        {"email": request.email, "password": request.password}
-    )
+    try:
+        result = app.state.auth_client.auth.sign_in_with_password(
+            {"email": request.email, "password": request.password}
+        )
+    except AuthApiError as exc:
+        # Untested until Phase 8's deployment testing turned up a live 500
+        # here: a wrong email/password previously fell through as an
+        # unhandled exception (a generic 500) instead of a normal 401.
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     return {"access_token": result.session.access_token, "user_id": result.user.id}
 
 
