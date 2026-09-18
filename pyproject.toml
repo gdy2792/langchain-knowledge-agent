@@ -1,0 +1,41 @@
+[project]
+name = "langchain-knowledge-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.121.0",
+    "langchain>=1.4.0",
+    "langchain-anthropic>=1.7.2",
+    "langchain-mcp-adapters>=0.3.2",
+    "langchain-pinecone>=0.2.13",
+    "langchain-text-splitters>=1.1.2",
+    "langchain-voyageai>=0.4.1",
+    "langgraph>=1.2.11",
+    "python-dotenv>=1.2.3",
+    "supabase>=2.24.0",
+    "uvicorn[standard]>=0.38.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.7",
+]
+
+[tool.ruff]
+# mcp_servers/ is vendored, unmodified from the sibling cli_project_working
+# project (Phase 8) — not ours to hold to our own lint standards or fix bugs
+# in.
+extend-exclude = ["mcp_servers"]
+
+[tool.ruff.lint]
+# BLE001 (no bare `except Exception`) is deliberately violated throughout
+# this project's graceful-degradation code (agent/core.py, server/main.py) —
+# an external-service hiccup (Voyage/Pinecone/Supabase) should degrade to a
+# warning, not crash a request, regardless of which specific exception type
+# the failing SDK happens to raise.
+ignore = ["BLE001"]

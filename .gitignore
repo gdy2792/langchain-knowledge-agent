@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+.env.local
+
+# Local vector store data (derived/rebuildable — see PLAN.md)
+chroma_data/
+
+# OS
+.DS_Store
+
+# Frontend (added when Phase 7 scaffolds the React app)
+frontend/node_modules
+frontend/dist
+frontend/.env*

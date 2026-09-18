@@ -1,0 +1,17 @@
+Internal Project Notes — LangChain Knowledge Agent
+
+The internal codename for this project during planning was "Project Marigold."
+
+The team's agreed retrieval chunk size is 500 characters with 50 characters
+of overlap, chosen after testing showed it kept individual facts from being
+split across chunk boundaries in short reference documents like this one.
+
+The vector store collection that holds ingested document chunks is named
+"document_chunks", and the separate collection used for cross-session
+conversation memory is named "conversation_memory". These are kept as two
+separate collections rather than one, so a document search never
+accidentally returns a snippet of a past conversation.
+
+The mascot chosen for this project, purely as an inside joke during
+planning, is a raccoon named Pinecone — a nod to the Pinecone vector
+database this project eventually migrates to in Phase 4.

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv sync
+      # Static analysis only, no imports executed — agent/config.py requires
+      # real API keys to even import (it validates them at module load
+      # time), which this CI job deliberately has no secrets for. Real
+      # mocked tests that exercise the actual code are Phase 9's job.
+      - run: uv run ruff check .
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npx tsc -b
+      - run: npm run lint
