@@ -24,13 +24,33 @@ export function Chat({
     setSending(true);
     setLog((prev) => [...prev, { kind: "user", text: message }]);
 
+    // Tracks whether the stream produced anything worth showing — if the
+    // backend's connection drops mid-reply, the loop below just ends
+    // quietly, and without this the user would see nothing at all.
+    let gotAnswerOrWarning = false;
     try {
       for await (const event of streamChat(accessToken, message)) {
+        if (event.type === "final_answer" || event.type === "warning") {
+          gotAnswerOrWarning = true;
+        }
         if (event.type === "final_answer") {
           setLog((prev) => [...prev, { kind: "answer", text: event.text }]);
         } else {
           setLog((prev) => [...prev, { kind: "event", event }]);
         }
+      }
+      if (!gotAnswerOrWarning) {
+        setLog((prev) => [
+          ...prev,
+          {
+            kind: "event",
+            event: {
+              type: "warning",
+              message:
+                "The server ended its reply without an answer. Check the backend logs for the error.",
+            },
+          },
+        ]);
       }
     } catch (err) {
       setLog((prev) => [

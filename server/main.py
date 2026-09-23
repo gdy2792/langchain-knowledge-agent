@@ -9,6 +9,7 @@ Phase 5: rebuilding any of this per-request would be needlessly slow.
 """
 
 import json
+import traceback
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -59,6 +60,11 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The Vercel frontend (a public site) calls this backend at 127.0.0.1 (a
+    # private/loopback address) — Chrome's Private Network Access policy
+    # blocks that with "Disallowed CORS private-network" on the preflight
+    # unless the server opts in explicitly with this header.
+    allow_private_network=True,
 )
 
 
@@ -101,10 +107,20 @@ def get_current_user_id(authorization: str = Header(...)) -> str:
 async def chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)) -> StreamingResponse:
     async def event_stream():
         final_text = ""
-        async for event in run_turn(app.state.agent, app.state.memory_store, user_id, request.message):
-            if event["type"] == "final_answer":
-                final_text = event["text"]
-            yield f"data: {json.dumps(event)}\n\n"
+        try:
+            async for event in run_turn(app.state.agent, app.state.memory_store, user_id, request.message):
+                if event["type"] == "final_answer":
+                    final_text = event["text"]
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            # By the time this runs the 200 status has already been sent, so
+            # an uncaught error here just cuts the stream off silently — the
+            # browser sees an empty reply and the user sees nothing at all
+            # (how Phase 8's invalid Render API key first showed up). Send
+            # the error as a normal event instead so the chat can display it.
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'warning', 'message': f'Agent error: {exc}'})}\n\n"
+            return
 
         # Same graceful-degradation reasoning as run_turn's own memory save:
         # the answer already streamed above, so a Postgres hiccup here
