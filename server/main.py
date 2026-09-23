@@ -43,6 +43,21 @@ async def lifespan(app: FastAPI):
         f"Startup: ANTHROPIC_API_KEY {ANTHROPIC_API_KEY[:13]}...{ANTHROPIC_API_KEY[-4:]} "
         f"({len(ANTHROPIC_API_KEY)} chars)"
     )
+    # A key pasted from a web page or doc can carry invisible or look-alike
+    # characters (zero-width spaces, soft hyphens, Unicode dashes) that look
+    # identical on screen but make Anthropic reject it. Real keys only use
+    # letters, digits, "-" and "_", so report any other character's
+    # position and code — never the character's neighbors or the key.
+    odd = [
+        f"position {i}: U+{ord(ch):04X}"
+        for i, ch in enumerate(ANTHROPIC_API_KEY)
+        if not (ch.isascii() and (ch.isalnum() or ch in "-_"))
+    ]
+    print(
+        f"Startup: ANTHROPIC_API_KEY check — starts with 'sk-ant-api03-': "
+        f"{ANTHROPIC_API_KEY.startswith('sk-ant-api03-')}; "
+        f"unexpected characters: {', '.join(odd) or 'none'}"
+    )
     agent, tools = await build_agent()
     print(f"Startup: connected tools: {[t['name'] if isinstance(t, dict) else t.name for t in tools]}")
     app.state.agent = agent
