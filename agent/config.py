@@ -33,7 +33,12 @@ CLI_PROJECT_DIR = _resolve_cli_project_dir()
 if CLI_PROJECT_DIR is not None:
     load_dotenv(CLI_PROJECT_DIR / ".env", override=False)
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# Stripped of surrounding whitespace and quotes: python-dotenv removes quotes
+# from a local .env value automatically, but a hosting dashboard like
+# Render's stores exactly what was pasted — so a key copied from a .env
+# line (`"sk-ant-..."`) arrives with literal quotes and Anthropic rejects it
+# as invalid (Phase 8's "API key is invalid" on Render, despite a new key).
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip().strip("\"'").strip()
 if not ANTHROPIC_API_KEY:
     fallback_hint = f" or in {CLI_PROJECT_DIR}/.env" if CLI_PROJECT_DIR else ""
     raise RuntimeError(

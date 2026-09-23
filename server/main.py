@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agent.config import FRONTEND_URL
+from agent.config import ANTHROPIC_API_KEY, FRONTEND_URL
 from agent.conversation_memory import build_conversation_memory_store
 from agent.core import build_agent, run_turn
 from agent.supabase_clients import build_auth_client, build_service_client
@@ -36,6 +36,13 @@ class LoginRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # A safe fingerprint of the key actually in use — never the key itself —
+    # so a deployed "API key is invalid" can be checked against the key list
+    # at console.anthropic.com, which shows keys as "sk-ant-api03-...XXXX".
+    print(
+        f"Startup: ANTHROPIC_API_KEY {ANTHROPIC_API_KEY[:13]}...{ANTHROPIC_API_KEY[-4:]} "
+        f"({len(ANTHROPIC_API_KEY)} chars)"
+    )
     agent, tools = await build_agent()
     print(f"Startup: connected tools: {[t['name'] if isinstance(t, dict) else t.name for t in tools]}")
     app.state.agent = agent
