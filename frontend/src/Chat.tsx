@@ -16,6 +16,14 @@ export function Chat({
   const [log, setLog] = useState<LogItem[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  // One id per conversation; "New chat" swaps in a fresh one so the agent
+  // starts over without the earlier back-and-forth.
+  const [threadId, setThreadId] = useState(() => crypto.randomUUID());
+
+  function newChat() {
+    setLog([]);
+    setThreadId(crypto.randomUUID());
+  }
 
   async function send() {
     const message = input.trim();
@@ -29,7 +37,7 @@ export function Chat({
     // quietly, and without this the user would see nothing at all.
     let gotAnswerOrWarning = false;
     try {
-      for await (const event of streamChat(accessToken, message)) {
+      for await (const event of streamChat(accessToken, message, threadId)) {
         if (event.type === "final_answer" || event.type === "warning") {
           gotAnswerOrWarning = true;
         }
@@ -66,9 +74,14 @@ export function Chat({
     <div className="chat">
       <div className="chat-header">
         <span>Knowledge Agent</span>
-        <button className="logout" onClick={onLogout}>
-          Log out
-        </button>
+        <div className="header-buttons">
+          <button className="logout" onClick={newChat} disabled={sending}>
+            New chat
+          </button>
+          <button className="logout" onClick={onLogout}>
+            Log out
+          </button>
+        </div>
       </div>
       <div className="log">
         {log.map((item, i) => (

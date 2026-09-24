@@ -29,9 +29,12 @@ export async function login(email: string, password: string): Promise<string> {
   return data.access_token as string;
 }
 
+// Messages sent with the same threadId are one conversation on the
+// backend — the agent remembers the earlier ones.
 export async function* streamChat(
   accessToken: string,
   message: string,
+  threadId: string,
 ): AsyncGenerator<ChatEvent> {
   const response = await fetch(`${API_URL}/chat`, {
     method: "POST",
@@ -39,7 +42,7 @@ export async function* streamChat(
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, thread_id: threadId }),
   });
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${await response.text()}`);

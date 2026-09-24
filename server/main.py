@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent.config import ANTHROPIC_API_KEY, FRONTEND_URL
 from agent.conversation_memory import build_conversation_memory_store
@@ -27,6 +27,9 @@ from supabase import AuthApiError
 
 class ChatRequest(BaseModel):
     message: str
+    # Messages sent with the same thread_id are one conversation (the agent
+    # remembers the earlier ones). Omitted = a fresh, standalone conversation.
+    thread_id: str | None = Field(default=None, max_length=100)
 
 
 class LoginRequest(BaseModel):
@@ -130,7 +133,9 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_current_user_id)
     async def event_stream():
         final_text = ""
         try:
-            async for event in run_turn(app.state.agent, app.state.memory_store, user_id, request.message):
+            async for event in run_turn(
+                app.state.agent, app.state.memory_store, user_id, request.message, request.thread_id
+            ):
                 if event["type"] == "final_answer":
                     final_text = event["text"]
                 yield f"data: {json.dumps(event)}\n\n"

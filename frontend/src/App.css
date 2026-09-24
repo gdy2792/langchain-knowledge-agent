@@ -59,6 +59,11 @@ body {
   font-weight: 600;
 }
 
+.chat-header .header-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .chat-header .logout {
   font-weight: normal;
   font-size: 0.85rem;

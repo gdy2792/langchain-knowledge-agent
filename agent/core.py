@@ -2,9 +2,11 @@
 tool backed by the local document knowledge store. Phase 3 adds cross-session
 conversation memory (agent/conversation_memory.py): every question+answer is
 embedded and stored, and relevant past turns are recalled before each new
-question — separate from LangGraph's own short-term, same-session memory,
-which we don't use here since main.py only ever runs one turn per process."""
+question. Short-term, same-conversation memory (so a follow-up like "and the
+second one?" makes sense) is LangGraph's checkpointer: each chat window gets
+a thread id, and the agent sees that thread's whole back-and-forth."""
 
+import asyncio
 import uuid
 
 # main.py has no login flow — it's a debug/validation script, not something
@@ -14,8 +16,9 @@ import uuid
 # Postgres `conversations.user_id` column the server writes to, which does).
 LOCAL_CLI_USER_ID = "local-cli-user"
 
+from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
-from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import InMemorySaver
 
 from agent.config import ANTHROPIC_API_KEY, CLAUDE_MODEL
 from agent.conversation_memory import (
@@ -24,15 +27,27 @@ from agent.conversation_memory import (
     recall_related_turns,
     save_turns,
 )
+from agent.history_tool import UserContext, build_history_tool
 from agent.knowledge_store import build_document_store
 from agent.mcp_tools import build_mcp_client
 from agent.retriever_tool import build_retriever_tool
+from agent.supabase_clients import build_service_client
 
 # Anthropic's server-side web search — unlike every other tool here, Claude
 # runs this one itself (Anthropic's own servers do the actual searching);
 # we just declare it, we never execute it. That's why it's a plain dict,
 # not a LangChain @tool-decorated function like search_knowledge_base.
 WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search"}
+
+# Seconds to wait before each retry of a failed long-term-memory save.
+# Voyage's free tier allows 3 requests/minute, so a rate-limited save
+# usually succeeds once the minute rolls over.
+SAVE_RETRY_DELAYS = (25, 60)
+
+# Saves still in progress (or waiting to retry). Held here so Python
+# doesn't garbage-collect a background task before it finishes, and so the
+# CLI can wait for them before exiting.
+_pending_saves: set[asyncio.Task] = set()
 
 
 async def build_agent():
@@ -44,25 +59,39 @@ async def build_agent():
     document_store = build_document_store()
     retriever_tool = build_retriever_tool(document_store)
 
-    tools = [*mcp_tools, retriever_tool, WEB_SEARCH_TOOL]
+    history_tool = build_history_tool(build_service_client())
+
+    tools = [*mcp_tools, retriever_tool, history_tool, WEB_SEARCH_TOOL]
     model = ChatAnthropic(model=CLAUDE_MODEL, api_key=ANTHROPIC_API_KEY)
-    agent = create_react_agent(model, tools)
+    # In-memory, so conversations are forgotten when the server restarts —
+    # the same lifetime as the chat window itself, whose log is gone after a
+    # page refresh anyway. Swapping in a Postgres checkpointer (Supabase)
+    # would make them survive restarts.
+    agent = create_agent(
+        model, tools, checkpointer=InMemorySaver(), context_schema=UserContext
+    )
     return agent, tools
 
 
-async def run_turn(agent, memory_store, user_id: str, query: str):
+async def run_turn(agent, memory_store, user_id: str, query: str, thread_id: str | None = None):
     """Runs one turn, yielding structured events as they happen. Shared by
     `ask()` below (prints them to a terminal) and the Phase 5 FastAPI server
     (streams them over HTTP as Server-Sent Events) — same logic, two front
-    doors, so the two never drift apart from each other."""
-    conversation_id = uuid.uuid4().hex
+    doors, so the two never drift apart from each other.
 
-    # Recall happens *before* this session's own turns are saved below, so
-    # only genuinely earlier sessions can ever be found here. Wrapped because
-    # an embedding-service hiccup (e.g. Voyage's free-tier rate limit) here
+    Turns sharing a `thread_id` are one conversation: the agent sees all of
+    that thread's earlier messages. No thread_id means a fresh conversation."""
+    conversation_id = thread_id or uuid.uuid4().hex
+    # Prefixed with user_id so one user can never continue another user's
+    # conversation, even by sending that conversation's thread id.
+    config = {"configurable": {"thread_id": f"{user_id}:{conversation_id}"}}
+
+    # Recall skips this conversation's own turns — the checkpointer already
+    # gives the agent those, in full and in order. Wrapped because an
+    # embedding-service hiccup (e.g. Voyage's free-tier rate limit) here
     # shouldn't prevent answering the question at all — just skip recall.
     try:
-        past_turns = recall_related_turns(memory_store, user_id, query)
+        past_turns = recall_related_turns(memory_store, user_id, query, exclude_conversation_id=conversation_id)
     except Exception as exc:
         past_turns = []
         yield {"type": "warning", "message": f"Memory recall unavailable: {exc}"}
@@ -74,10 +103,14 @@ async def run_turn(agent, memory_store, user_id: str, query: str):
     final_text = ""
     async for step in agent.astream(
         {"messages": [("user", agent_input)]},
+        config,
+        context=UserContext(user_id=user_id),
         stream_mode="updates",
     ):
         for node_output in step.values():
-            for message in node_output.get("messages", []):
+            # Some steps report no changes at all (None) rather than an
+            # empty dict.
+            for message in (node_output or {}).get("messages", []):
                 if getattr(message, "tool_calls", None):
                     for call in message.tool_calls:
                         yield {"type": "tool_call", "name": call["name"], "args": call["args"]}
@@ -98,17 +131,41 @@ async def run_turn(agent, memory_store, user_id: str, query: str):
 
     yield {"type": "final_answer", "text": final_text}
 
-    # The answer is already delivered at this point — a failure here should
-    # degrade to "this turn won't be recalled later," not crash the request.
-    try:
-        save_turns(
-            memory_store,
-            conversation_id,
-            user_id,
-            [("user", query), ("assistant", final_text)],
+    # The answer is already delivered, so the save runs in the background
+    # (with retries) instead of holding the reply open while it waits out a
+    # rate limit.
+    task = asyncio.create_task(
+        _save_turns_with_retry(
+            memory_store, conversation_id, user_id, [("user", query), ("assistant", final_text)]
         )
-    except Exception as exc:
-        yield {"type": "warning", "message": f"Failed to save this turn to memory: {exc}"}
+    )
+    _pending_saves.add(task)
+    task.add_done_callback(_pending_saves.discard)
+
+
+async def _save_turns_with_retry(memory_store, conversation_id, user_id, turns) -> None:
+    """A failure here only means "this turn won't be recalled later," so it's
+    logged to the server console rather than shown in the chat, which has
+    already finished by the time a retry happens."""
+    for attempt, delay in enumerate((0, *SAVE_RETRY_DELAYS), start=1):
+        await asyncio.sleep(delay)
+        try:
+            # save_turns makes blocking network calls — run it on a worker
+            # thread so it doesn't stall every other request while it waits.
+            await asyncio.to_thread(save_turns, memory_store, conversation_id, user_id, turns)
+            if attempt > 1:
+                print(f"Memory save succeeded on attempt {attempt}.")
+            return
+        except Exception as exc:
+            print(f"Memory save attempt {attempt} failed: {str(exc)[:150]}")
+    print("Memory save gave up — this turn won't be recalled in later chats.")
+
+
+async def wait_for_pending_saves() -> None:
+    """Lets a short-lived process (the CLI) finish its background saves
+    before exiting, instead of cancelling them."""
+    if _pending_saves:
+        await asyncio.gather(*_pending_saves)
 
 
 async def ask(query: str) -> str:
@@ -135,4 +192,5 @@ async def ask(query: str) -> str:
         elif event["type"] == "warning":
             print(f"WARNING: {event['message']}")
 
+    await wait_for_pending_saves()
     return final_text

@@ -68,11 +68,20 @@ def save_turns(
 
 
 def recall_related_turns(
-    store: PineconeVectorStore, user_id: str, query: str, k: int = 4
+    store: PineconeVectorStore,
+    user_id: str,
+    query: str,
+    k: int = 4,
+    exclude_conversation_id: str | None = None,
 ) -> list[Document]:
     """Finds past turns related to `query` by meaning, scoped to this user's
-    own turns only — never another user's, regardless of how relevant."""
-    return store.similarity_search(query, k=k, filter={"user_id": user_id})
+    own turns only — never another user's, regardless of how relevant.
+    `exclude_conversation_id` leaves out the current conversation, which the
+    agent already has in full from LangGraph's checkpointer."""
+    search_filter: dict = {"user_id": user_id}
+    if exclude_conversation_id:
+        search_filter["conversation_id"] = {"$ne": exclude_conversation_id}
+    return store.similarity_search(query, k=k, filter=search_filter)
 
 
 def format_memory_context(turns: list[Document]) -> str:
