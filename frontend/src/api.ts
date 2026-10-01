@@ -16,6 +16,10 @@ export type ChatEvent =
   | { type: "final_answer"; text: string }
   | { type: "warning"; message: string };
 
+// Supabase access tokens expire after about an hour, and nothing here
+// refreshes them — so the backend's 401 means "log in again", not a bug.
+export class SessionExpiredError extends Error {}
+
 export async function login(email: string, password: string): Promise<string> {
   const response = await fetch(`${API_URL}/auth/login`, {
     method: "POST",
@@ -44,6 +48,9 @@ export async function* streamChat(
     },
     body: JSON.stringify({ message, thread_id: threadId }),
   });
+  if (response.status === 401) {
+    throw new SessionExpiredError(await response.text());
+  }
   if (!response.ok || !response.body) {
     throw new Error(`Chat request failed: ${await response.text()}`);
   }
