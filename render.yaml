@@ -1,0 +1,36 @@
+# Render Blueprint for the backend (FastAPI agent + its MCP tool servers).
+# The React frontend is deployed separately on Vercel (frontend/).
+#
+# Secrets are `sync: false`: Render asks for each value in its dashboard
+# when the Blueprint is first applied, so none are ever committed here.
+# Paste values without surrounding quotes.
+services:
+  - type: web
+    name: langchain-knowledge-agent
+    runtime: python
+    plan: free
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    # Runs uvicorn from the venv directly, so `uv` isn't needed at runtime.
+    # agent/mcp_tools.py starts each MCP server with this same Python.
+    startCommand: .venv/bin/uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      - key: CLAUDE_MODEL
+        value: claude-opus-5
+      - key: FRONTEND_URL
+        value: https://frontend-dusky-gamma-65.vercel.app
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: VOYAGE_API_KEY
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false
