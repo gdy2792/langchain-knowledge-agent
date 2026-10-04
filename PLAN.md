@@ -84,3 +84,51 @@ Same core agent logic as Variant A, with Pinecone from the start instead of Chro
 ## Sequencing Recommendation
 
 **Superseded by the "Chosen Path" section above** — kept here as the reasoning for why Variant A exists at all: its Phases 0–3 are nearly identical in *design* to Variant B's (same agent, same chunking/retrieval logic — only the vector-store backend differs), so validating them locally first is never wasted effort even under time pressure, just not worth polishing into a full separate deliverable when the real target is deployed.
+
+---
+
+## Next: Private Document Library (Phases 10–15)
+
+**Goal:** Each signed-in user can add their own documents — uploaded files or web links — over the API and a Documents page, and the agent answers questions from them. Documents are private to their owner.
+
+**Done first (2026-09-23, commit `965ec5d`):** same-chat conversation memory (LangGraph checkpointer + "New chat" button), background retries for rate-limited long-term memory saves, and a `recent_conversation_history` tool that reads the Supabase transcript log in time order. Also swapped the deprecated `create_react_agent` for `langchain.agents.create_agent`.
+
+### Decisions
+
+| Question | Decision |
+|---|---|
+| Shared or private documents? | **Private** — each user sees and searches only their own, plus the shared `knowledge/` folder |
+| How documents get in | **File uploads and web links** |
+| File types | `.txt`, `.md`, Word `.docx`, PDF, Excel `.xlsx` and `.xls` |
+
+### File-type notes
+
+| Type | Library | Limitation |
+|---|---|---|
+| `.txt` / `.md` | none | — |
+| Word `.docx` | `python-docx` | Old pre-2007 `.doc` not supported — re-save as `.docx` |
+| PDF | `pypdf` | Scanned PDFs (pictures of pages) have no text — detect and report, don't store empty |
+| Excel `.xlsx` / `.xls` | `openpyxl` / `xlrd` | Good for text-heavy sheets; weak for number questions ("total sales in March") — a calculation tool can be added later if needed |
+| Web links | `httpx` + an HTML-to-text library | Pages built by JavaScript may come back mostly empty |
+
+### Prerequisite
+
+**Add a payment method to Voyage.** The free tier without one is capped at 3 requests and 10,000 tokens per minute — one 30-page PDF would take ~3 minutes to embed and block chat meanwhile. The 200M free tokens still apply after adding a card.
+
+### Phases
+
+| Phase | Goal | Check yourself |
+|---|---|---|
+| 10 — Storage setup | `documents` table in Supabase (id, owner, name, type, source URL, chunk count, date) + a Storage bucket for original files. Every Pinecone chunk tagged with its owner; search filters to the user's own documents + shared ones. `ingest.py` changed to replace only the shared `knowledge/` chunks, not wipe the whole namespace | Question about `project_facts.txt` still answered correctly |
+| 11 — Upload text files | `POST /documents`, `GET /documents`, `GET /documents/{id}`, `DELETE /documents/{id}` for `.txt`/`.md`, login required. Chunk ids are `<document id>#<n>` so one document can be removed without touching others | Upload a file with a made-up fact → agent knows it → delete → agent doesn't |
+| 12 — Word, PDF, Excel | Text extraction per type; 10 MB upload limit; clear error for unsupported/empty files | One file of each type, each answering a question only it contains |
+| 13 — Web links | `POST /documents` with `{"url": ...}`; blocks `localhost`/private-network addresses so the server can't be used to probe internal systems | Add a Wikipedia page, ask about it |
+| 14 — Documents page (React) | Upload button, paste-a-link box, document list, delete buttons | Phases 11–13 done by clicking instead of `curl` |
+| 15 — Privacy test | Two accounts: B must not see, list, delete, or get answers from A's documents. Also closes the open Phase 6 "two accounts, isolated data" item | Account B can't find account A's document by any route |
+
+**Later, if needed:** background processing for large files (respond "processing" immediately), a spreadsheet calculation tool, and a smarter LangGraph search flow that checks result relevance and retries.
+
+### Security notes
+
+- Uploaded text becomes something the agent trusts — keep uploads behind login, and treat document content as information, not instructions.
+- The backend's Supabase service-role key bypasses Row Level Security, so every document query must filter by the signed-in user's id in code.

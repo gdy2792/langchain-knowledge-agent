@@ -12,6 +12,7 @@ wheels/
 # Secrets
 .env
 .env.local
+.env copy*
 
 # Local vector store data (derived/rebuildable — see PLAN.md)
 chroma_data/
